@@ -3,6 +3,7 @@ package java.in.rcard.sc;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.StructuredTaskScope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,6 +59,31 @@ public class Main {
               "raise4s", Visibility.PUBLIC, URI.create("https://github.com/rcardin/raise4s")),
           new Repository(
               "sus4s", Visibility.PUBLIC, URI.create("https://github.com/rcardin/sus4s")));
+    }
+  }
+
+  interface FindGitHubUserUseCase {
+    GitHubUser findGitHubUser(UserId userId) throws InterruptedException;
+  }
+
+  class FindGitHubUserService implements FindGitHubUserUseCase {
+    private final FindUserByIdPort findUserByIdPort;
+    private final FindRepositoriesByUserIdPort findRepositoriesByUserIdPort;
+
+    public FindGitHubUserService(
+        FindUserByIdPort findUserByIdPort,
+        FindRepositoriesByUserIdPort findRepositoriesByUserIdPort) {
+      this.findUserByIdPort = findUserByIdPort;
+      this.findRepositoriesByUserIdPort = findRepositoriesByUserIdPort;
+    }
+
+    @Override
+    public GitHubUser findGitHubUser(UserId userId) throws InterruptedException {
+      try (var scope = StructuredTaskScope.open()) {
+        // TODO
+        scope.join();
+        return null;
+      }
     }
   }
 
