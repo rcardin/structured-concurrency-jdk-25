@@ -1,4 +1,4 @@
-package java.in.rcard.sc;
+package in.rcard.sc;
 
 import java.net.URI;
 import java.time.Duration;
@@ -35,18 +35,19 @@ public class Main {
     List<Repository> findRepositories(UserId userId) throws InterruptedException;
   }
 
-  void delay(Duration duration) throws InterruptedException {
+  static void delay(Duration duration) throws InterruptedException {
     Thread.sleep(duration);
   }
 
-  class GitHubRepository implements FindUserByIdPort, FindRepositoriesByUserIdPort {
+  static class GitHubRepository implements FindUserByIdPort, FindRepositoriesByUserIdPort {
 
     @Override
     public User findUser(UserId userId) throws InterruptedException {
       LOGGER.info("Finding user with id '{}'", userId);
       delay(Duration.ofMillis(500L));
-      LOGGER.info("User '{}' found", userId);
-      return new User(userId, new UserName("rcardin"), new Email("rcardin@rockthejvm.com"));
+      throw new RuntimeException("Error finding user with id '%s'".formatted(userId));
+      //      LOGGER.info("User '{}' found", userId);
+      //      return new User(userId, new UserName("rcardin"), new Email("rcardin@rockthejvm.com"));
     }
 
     @Override
@@ -66,7 +67,8 @@ public class Main {
     GitHubUser findGitHubUser(UserId userId) throws InterruptedException;
   }
 
-  class FindGitHubUserService implements FindGitHubUserUseCase {
+  @SuppressWarnings("preview")
+  static class FindGitHubUserService implements FindGitHubUserUseCase {
     private final FindUserByIdPort findUserByIdPort;
     private final FindRepositoriesByUserIdPort findRepositoriesByUserIdPort;
 
@@ -80,14 +82,22 @@ public class Main {
     @Override
     public GitHubUser findGitHubUser(UserId userId) throws InterruptedException {
       try (var scope = StructuredTaskScope.open()) {
-        // TODO
+
+        var user = scope.fork(() -> findUserByIdPort.findUser(userId));
+        var repositories = scope.fork(() -> findRepositoriesByUserIdPort.findRepositories(userId));
+
         scope.join();
-        return null;
+
+        return new GitHubUser(user.get(), repositories.get());
       }
     }
+
   }
 
-  public static void main(String[] args) {
-    LOGGER.info("Application finished!");
+  void main() throws InterruptedException {
+    var gitHubRepository = new GitHubRepository();
+    var findGitHubUserService = new FindGitHubUserService(gitHubRepository, gitHubRepository);
+
+    findGitHubUserService.findGitHubUser(new UserId(1L));
   }
 }
