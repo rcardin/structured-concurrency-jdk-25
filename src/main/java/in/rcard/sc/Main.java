@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.concurrent.StructuredTaskScope;
+import java.util.concurrent.StructuredTaskScope.FailedException;
 import java.util.concurrent.StructuredTaskScope.Joiner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -126,12 +127,12 @@ public class Main {
 
     public FindRepositoriesByUserIdCache() {
       cache.put(
-              new UserId(42L),
-              List.of(
-                      new Repository(
-                              "rockthejvm.github.io",
-                              Visibility.PUBLIC,
-                              URI.create("https://github.com/rockthejvm/rockthejvm.github.io"))));
+          new UserId(42L),
+          List.of(
+              new Repository(
+                  "rockthejvm.github.io",
+                  Visibility.PUBLIC,
+                  URI.create("https://github.com/rockthejvm/rockthejvm.github.io"))));
     }
 
     @Override
@@ -142,24 +143,56 @@ public class Main {
       if (repositories == null) {
         LOGGER.info("No cached repositories found for user with id '{}'", userId);
         throw new NoSuchElementException(
-                "No cached repositories found for user with id '%s'".formatted(userId));
+            "No cached repositories found for user with id '%s'".formatted(userId));
       }
       return repositories;
     }
 
     public void addToCache(UserId userId, List<Repository> repositories)
-            throws InterruptedException {
+        throws InterruptedException {
       // Simulates access to a distributed cache (Redis?)
       delay(Duration.ofMillis(100L));
       cache.put(userId, repositories);
     }
   }
 
-  void main() throws InterruptedException {
-    var gitHubRepository = new GitHubRepository();
-    var findGitHubUserService = new FindGitHubUserService(gitHubRepository, gitHubRepository);
-    var findGitHubUsersService = new FindGitHubUsersService(findGitHubUserService);
+  @SuppressWarnings("preview")
+  static class GitHubCachedRepository implements FindRepositoriesByUserIdPort {
 
-    findGitHubUsersService.findGitHubUsers(List.of(new UserId(1L), new UserId(2L)));
+    private final FindRepositoriesByUserIdPort repository;
+    private final FindRepositoriesByUserIdCache cache;
+
+    GitHubCachedRepository(
+        FindRepositoriesByUserIdPort repository, FindRepositoriesByUserIdCache cache) {
+      this.repository = repository;
+      this.cache = cache;
+    }
+
+    @Override
+    public List<Repository> findRepositories(UserId userId)
+        throws InterruptedException, FailedException {
+      try (var scope =
+          StructuredTaskScope.open(Joiner.<List<Repository>>anySuccessfulResultOrThrow())) {
+        scope.fork(() -> cache.findRepositories(userId));
+        scope.fork(
+            () -> {
+              final List<Repository> repositories = repository.findRepositories(userId);
+              cache.addToCache(userId, repositories);
+              return repositories;
+            });
+        return scope.join();
+      }
+    }
+  }
+
+  void main() throws InterruptedException {
+    final GitHubRepository gitHubRepository = new GitHubRepository();
+    final FindRepositoriesByUserIdCache cache = new FindRepositoriesByUserIdCache();
+    final FindRepositoriesByUserIdPort gitHubCachedRepository =
+        new GitHubCachedRepository(gitHubRepository, cache);
+
+    final List<Repository> repositories = gitHubCachedRepository.findRepositories(new UserId(42L));
+
+    LOGGER.info("GitHub user's repositories: {}", repositories);
   }
 }
