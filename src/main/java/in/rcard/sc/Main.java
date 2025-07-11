@@ -185,6 +185,26 @@ public class Main {
     }
   }
 
+  @SuppressWarnings("preview")
+  static class PreloadCacheUseCase {
+    Map<UserId, List<Repository>> preloadCache(List<UserId> userIds) throws InterruptedException {
+      var cache = new HashMap<UserId, List<Repository>>();
+      try (var scope = StructuredTaskScope.open(Joiner.awaitAll())) {
+        userIds.forEach(
+            userId ->
+                scope.fork(
+                    () -> {
+                      final List<Repository> repositories =
+                          new GitHubRepository().findRepositories(userId);
+                      cache.put(userId, repositories);
+                      return repositories;
+                    }));
+        scope.join();
+      }
+      return cache;
+    }
+  }
+
   void main() throws InterruptedException {
     final GitHubRepository gitHubRepository = new GitHubRepository();
     final FindRepositoriesByUserIdCache cache = new FindRepositoriesByUserIdCache();
