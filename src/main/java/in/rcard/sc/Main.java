@@ -40,11 +40,18 @@ public class Main {
     List<Repository> findRepositories(UserId userId) throws InterruptedException;
   }
 
+  interface FindRepositoriesByUserIdListPort {
+    Map<UserId, List<Repository>> findRepositories(List<UserId> userIds)
+        throws InterruptedException;
+  }
+
   static void delay(Duration duration) throws InterruptedException {
     Thread.sleep(duration);
   }
 
-  static class GitHubRepository implements FindUserByIdPort, FindRepositoriesByUserIdPort {
+  @SuppressWarnings("preview")
+  static class GitHubRepository
+      implements FindUserByIdPort, FindRepositoriesByUserIdPort, FindRepositoriesByUserIdListPort {
 
     @Override
     public User findUser(UserId userId) throws InterruptedException {
@@ -65,6 +72,29 @@ public class Main {
               "raise4s", Visibility.PUBLIC, URI.create("https://github.com/rcardin/raise4s")),
           new Repository(
               "sus4s", Visibility.PUBLIC, URI.create("https://github.com/rcardin/sus4s")));
+    }
+
+    @Override
+    public Map<UserId, List<Repository>> findRepositories(List<UserId> userIds)
+        throws InterruptedException {
+      var repositoriesByUserId = new HashMap<UserId, List<Repository>>();
+      try (var scope = StructuredTaskScope.open(Joiner.awaitAll())) {
+        userIds.forEach(
+            userId -> {
+              if (userId.equals(new UserId(42))) {
+                throw new RuntimeException(
+                    "Network error while finding repositories for user '%s'".formatted(userId));
+              }
+              scope.fork(
+                  () -> {
+                    final List<Repository> repositories = findRepositories(userId);
+                    repositoriesByUserId.put(userId, repositories);
+                    return repositories;
+                  });
+            });
+        scope.join();
+      }
+      return repositoriesByUserId;
     }
   }
 
@@ -123,16 +153,12 @@ public class Main {
 
   static class FindRepositoriesByUserIdCache implements FindRepositoriesByUserIdPort {
 
-    private final Map<UserId, List<Repository>> cache = new HashMap<>();
+    private final Map<UserId, List<Repository>> cache;
 
-    public FindRepositoriesByUserIdCache() {
-      cache.put(
-          new UserId(42L),
-          List.of(
-              new Repository(
-                  "rockthejvm.github.io",
-                  Visibility.PUBLIC,
-                  URI.create("https://github.com/rockthejvm/rockthejvm.github.io"))));
+    public FindRepositoriesByUserIdCache(FindRepositoriesByUserIdListPort findRepositories)
+        throws InterruptedException {
+      this.cache =
+          findRepositories.findRepositories(List.of(new UserId(1), new UserId(2), new UserId(42L)));
     }
 
     @Override
@@ -185,29 +211,9 @@ public class Main {
     }
   }
 
-  @SuppressWarnings("preview")
-  static class PreloadCacheUseCase {
-    Map<UserId, List<Repository>> preloadCache(List<UserId> userIds) throws InterruptedException {
-      var cache = new HashMap<UserId, List<Repository>>();
-      try (var scope = StructuredTaskScope.open(Joiner.awaitAll())) {
-        userIds.forEach(
-            userId ->
-                scope.fork(
-                    () -> {
-                      final List<Repository> repositories =
-                          new GitHubRepository().findRepositories(userId);
-                      cache.put(userId, repositories);
-                      return repositories;
-                    }));
-        scope.join();
-      }
-      return cache;
-    }
-  }
-
   void main() throws InterruptedException {
     final GitHubRepository gitHubRepository = new GitHubRepository();
-    final FindRepositoriesByUserIdCache cache = new FindRepositoriesByUserIdCache();
+    final FindRepositoriesByUserIdCache cache = new FindRepositoriesByUserIdCache(gitHubRepository);
     final FindRepositoriesByUserIdPort gitHubCachedRepository =
         new GitHubCachedRepository(gitHubRepository, cache);
 
