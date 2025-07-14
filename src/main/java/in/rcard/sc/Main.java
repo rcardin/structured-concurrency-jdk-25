@@ -81,12 +81,13 @@ public class Main {
       try (var scope = StructuredTaskScope.open(Joiner.awaitAll())) {
         userIds.forEach(
             userId -> {
-              if (userId.equals(new UserId(42))) {
-                throw new RuntimeException(
-                    "Network error while finding repositories for user '%s'".formatted(userId));
-              }
               scope.fork(
                   () -> {
+                    if (userId.equals(new UserId(42))) {
+                      throw new RuntimeException(
+                          "Network error while finding repositories for user '%s'"
+                              .formatted(userId));
+                    }
                     final List<Repository> repositories = findRepositories(userId);
                     repositoriesByUserId.put(userId, repositories);
                     return repositories;
@@ -214,10 +215,8 @@ public class Main {
   void main() throws InterruptedException {
     final GitHubRepository gitHubRepository = new GitHubRepository();
     final FindRepositoriesByUserIdCache cache = new FindRepositoriesByUserIdCache(gitHubRepository);
-    final FindRepositoriesByUserIdPort gitHubCachedRepository =
-        new GitHubCachedRepository(gitHubRepository, cache);
 
-    final List<Repository> repositories = gitHubCachedRepository.findRepositories(new UserId(42L));
+    final List<Repository> repositories = cache.findRepositories(new UserId(42L));
 
     LOGGER.info("GitHub user's repositories: {}", repositories);
   }
