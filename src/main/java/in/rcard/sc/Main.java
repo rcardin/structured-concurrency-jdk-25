@@ -2,16 +2,16 @@ package in.rcard.sc;
 
 import java.net.URI;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
+import java.util.*;
 import java.util.concurrent.StructuredTaskScope;
 import java.util.concurrent.StructuredTaskScope.FailedException;
 import java.util.concurrent.StructuredTaskScope.Joiner;
+import java.util.concurrent.StructuredTaskScope.Subtask;
+import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+@SuppressWarnings("ALL")
 public class Main {
   private static final Logger LOGGER = LoggerFactory.getLogger(Main.class);
 
@@ -26,6 +26,8 @@ public class Main {
   record Email(String value) {}
 
   record Repository(String name, Visibility visibility, URI uri) {}
+
+  record RepoStructure(Repository repository, List<String> files) {}
 
   enum Visibility {
     PUBLIC,
@@ -45,13 +47,20 @@ public class Main {
         throws InterruptedException;
   }
 
+  interface FindAllRepositoryFilesPort {
+    List<String> findAllFiles(Repository repository) throws InterruptedException;
+  }
+
   static void delay(Duration duration) throws InterruptedException {
     Thread.sleep(duration);
   }
 
   @SuppressWarnings("preview")
   static class GitHubRepository
-      implements FindUserByIdPort, FindRepositoriesByUserIdPort, FindRepositoriesByUserIdListPort {
+      implements FindUserByIdPort,
+          FindRepositoriesByUserIdPort,
+          FindRepositoriesByUserIdListPort,
+          FindAllRepositoryFilesPort {
 
     @Override
     public User findUser(UserId userId) throws InterruptedException {
@@ -97,6 +106,29 @@ public class Main {
       }
       return repositoriesByUserId;
     }
+
+    @Override
+    public List<String> findAllFiles(Repository repository) throws InterruptedException {
+      LOGGER.info("Finding files for repository '{}'", repository.name);
+      switch (repository.name) {
+        case "raise4s" -> {
+          delay(Duration.ofMillis(500L));
+          return List.of("README.md", "src/main/scala/in/rcard/raise4s/Main.scala");
+        }
+        case "sus4s" -> {
+          delay(Duration.ofMillis(100L));
+          return List.of("src/main/scala/in/rcard/sus4s/Main.scala");
+        }
+        case "yaes" -> {
+          delay(Duration.ofMillis(700L));
+          return List.of("src/test/scala/in/rcard/yaes/MainTest.scala");
+        }
+        default -> {
+          delay(Duration.ofMillis(250L));
+          throw new RuntimeException("Unknown repository '%s'".formatted(repository.name));
+        }
+      }
+    }
   }
 
   interface FindGitHubUserUseCase {
@@ -105,6 +137,52 @@ public class Main {
 
   interface FindGitHubUsersUseCase {
     List<GitHubUser> findGitHubUsers(List<UserId> userIds) throws InterruptedException;
+  }
+
+  interface FirstRepositoryByFileNameUseCase {
+    Optional<Repository> firstRepositoryByFileName(
+        List<Repository> repositories, String fileNameToMatch) throws InterruptedException;
+  }
+
+  static class FirstRepositoryByFileNameService implements FirstRepositoryByFileNameUseCase {
+
+    private final FindAllRepositoryFilesPort findAllFilesPort;
+
+    FirstRepositoryByFileNameService(FindAllRepositoryFilesPort findAllFilesPort) {
+      this.findAllFilesPort = findAllFilesPort;
+    }
+
+    @Override
+    public Optional<Repository> firstRepositoryByFileName(
+        List<Repository> repositories, String fileNameToMatch) throws InterruptedException {
+
+      class CancelIfFound implements Predicate<Subtask<? extends RepoStructure>> {
+
+        @Override
+        public boolean test(Subtask<? extends RepoStructure> subtask) {
+          return subtask.state() == Subtask.State.SUCCESS
+              && subtask.get().files().contains(fileNameToMatch);
+        }
+      }
+
+      var cancelIfFound = new CancelIfFound();
+
+      try (var scope = StructuredTaskScope.open(Joiner.<RepoStructure>allUntil(cancelIfFound))) {
+        repositories.forEach(
+            repository ->
+                scope.fork(
+                    () -> {
+                      final List<String> files = findAllFilesPort.findAllFiles(repository);
+                      return new RepoStructure(repository, files);
+                    }));
+
+        return scope
+            .join()
+            .filter(subtask -> subtask.state() == Subtask.State.SUCCESS)
+            .findFirst()
+            .map(subtask -> subtask.get().repository());
+      }
+    }
   }
 
   @SuppressWarnings("preview")
@@ -121,7 +199,7 @@ public class Main {
       try (var scope = StructuredTaskScope.open(Joiner.<GitHubUser>allSuccessfulOrThrow())) {
         userIds.forEach(userId -> scope.fork(() -> findGitHubUser.findGitHubUser(userId)));
 
-        return scope.join().map(StructuredTaskScope.Subtask::get).toList();
+        return scope.join().map(Subtask::get).toList();
       }
     }
   }
