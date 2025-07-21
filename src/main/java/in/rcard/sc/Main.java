@@ -173,6 +173,8 @@ public class Main {
                 scope.fork(
                     () -> {
                       final List<String> files = findAllFilesPort.findAllFiles(repository);
+                      LOGGER.info(
+                          "Found {} files for repository '{}'", files.size(), repository.name);
                       return new RepoStructure(repository, files);
                     }));
 
@@ -291,11 +293,26 @@ public class Main {
   }
 
   void main() throws InterruptedException {
-    final GitHubRepository gitHubRepository = new GitHubRepository();
-    final FindRepositoriesByUserIdCache cache = new FindRepositoriesByUserIdCache(gitHubRepository);
+    final FirstRepositoryByFileNameUseCase useCase =
+        new FirstRepositoryByFileNameService(new GitHubRepository());
 
-    final List<Repository> repositories = cache.findRepositories(new UserId(42L));
+    final Optional<Repository> maybeRepoWithReadme =
+        useCase.firstRepositoryByFileName(
+            List.of(
+                new Repository(
+                    "raise4s", Visibility.PUBLIC, URI.create("https://github.com/rcardin/raise4s")),
+                new Repository(
+                    "sus4s", Visibility.PUBLIC, URI.create("https://github.com/rcardin/sus4s")),
+                new Repository(
+                    "yaes", Visibility.PUBLIC, URI.create("https://github.com/rcardin/yaes")),
+                new Repository(
+                    "kafkaesque",
+                    Visibility.PUBLIC,
+                    URI.create("https://github.com/rcardin/kafkaesque"))),
+            "README.md");
 
-    LOGGER.info("GitHub user's repositories: {}", repositories);
+    LOGGER.info(
+        "First repository with 'README.md': {}",
+        maybeRepoWithReadme.map(Repository::name).orElse("Not found"));
   }
 }
