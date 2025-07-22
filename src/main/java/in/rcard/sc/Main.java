@@ -292,6 +292,40 @@ public class Main {
     }
   }
 
+  static class FirstCompleted<T> implements Joiner<T, T> {
+
+    private T firstResult;
+    private Throwable firstException;
+
+    @Override
+    public boolean onComplete(Subtask<? extends T> subtask) {
+      return switch (subtask.state()) {
+        case SUCCESS -> {
+          synchronized (this) {
+            if (firstResult == null) {
+              firstResult = subtask.get();
+            }
+            yield true;
+          }
+        }
+        case FAILED -> {
+          synchronized (this) {
+            if (firstException == null) {
+              firstException = subtask.exception();
+            }
+            yield true;
+          }
+        }
+        case UNAVAILABLE -> Joiner.super.onComplete(subtask);
+      };
+    }
+
+    @Override
+    public T result() throws Throwable {
+      return null;
+    }
+  }
+
   void main() throws InterruptedException {
     final FirstRepositoryByFileNameUseCase useCase =
         new FirstRepositoryByFileNameService(new GitHubRepository());
