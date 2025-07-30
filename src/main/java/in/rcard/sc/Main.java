@@ -361,11 +361,30 @@ public class Main {
     }
   }
 
+  static class FindRepositoriesByUserIdWithConfigTimeout {
+
+    final FindRepositoriesByUserIdPort delegate;
+
+    FindRepositoriesByUserIdWithConfigTimeout(FindRepositoriesByUserIdPort delegate) {
+      this.delegate = delegate;
+    }
+
+    List<Repository> findRepositories(UserId userId, Duration timeout) throws InterruptedException {
+      try (var scope =
+          StructuredTaskScope.open(
+              Joiner.<List<Repository>>anySuccessfulResultOrThrow(),
+              config -> config.withName("timed").withTimeout(timeout))) {
+        scope.fork(() -> delegate.findRepositories(userId));
+        return scope.join();
+      }
+    }
+  }
+
   void main() throws InterruptedException {
     final GitHubRepository gitHubRepository = new GitHubRepository();
 
-    final FindRepositoriesByUserIdWithTimeout findRepositoriesWithTimeout =
-        new FindRepositoriesByUserIdWithTimeout(gitHubRepository);
+    final FindRepositoriesByUserIdWithConfigTimeout findRepositoriesWithTimeout =
+        new FindRepositoriesByUserIdWithConfigTimeout(gitHubRepository);
 
     final List<Repository> repositories =
         findRepositoriesWithTimeout.findRepositories(new UserId(1L), Duration.ofMillis(500L));
