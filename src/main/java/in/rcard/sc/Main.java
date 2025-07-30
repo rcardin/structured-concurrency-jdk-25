@@ -3,10 +3,12 @@ package in.rcard.sc;
 import java.net.URI;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.Callable;
 import java.util.concurrent.StructuredTaskScope;
 import java.util.concurrent.StructuredTaskScope.FailedException;
 import java.util.concurrent.StructuredTaskScope.Joiner;
 import java.util.concurrent.StructuredTaskScope.Subtask;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -322,31 +324,52 @@ public class Main {
 
     @Override
     public T result() throws Throwable {
-      return null;
+      if (firstException != null) {
+        throw firstException;
+      }
+      return firstResult;
+    }
+  }
+
+  static <T> T race(Callable<T> first, Callable<T> second)
+      throws InterruptedException, FailedException {
+    try (var scope = StructuredTaskScope.open(new FirstCompleted<T>())) {
+      scope.fork(first);
+      scope.fork(second);
+      return scope.join();
+    }
+  }
+
+  static class FindRepositoriesByUserIdWithTimeout {
+
+    final FindRepositoriesByUserIdPort delegate;
+
+    FindRepositoriesByUserIdWithTimeout(FindRepositoriesByUserIdPort delegate) {
+      this.delegate = delegate;
+    }
+
+    List<Repository> findRepositories(UserId userId, Duration timeout) throws InterruptedException {
+      try (var scope = StructuredTaskScope.open(new FirstCompleted<List<Repository>>())) {
+        scope.fork(() -> delegate.findRepositories(userId));
+        scope.fork(
+            () -> {
+              delay(timeout);
+              throw new TimeoutException("Timeout of %s reached".formatted(timeout));
+            });
+        return scope.join();
+      }
     }
   }
 
   void main() throws InterruptedException {
-    final FirstRepositoryByFileNameUseCase useCase =
-        new FirstRepositoryByFileNameService(new GitHubRepository());
+    final GitHubRepository gitHubRepository = new GitHubRepository();
 
-    final Optional<Repository> maybeRepoWithReadme =
-        useCase.firstRepositoryByFileName(
-            List.of(
-                new Repository(
-                    "raise4s", Visibility.PUBLIC, URI.create("https://github.com/rcardin/raise4s")),
-                new Repository(
-                    "sus4s", Visibility.PUBLIC, URI.create("https://github.com/rcardin/sus4s")),
-                new Repository(
-                    "yaes", Visibility.PUBLIC, URI.create("https://github.com/rcardin/yaes")),
-                new Repository(
-                    "kafkaesque",
-                    Visibility.PUBLIC,
-                    URI.create("https://github.com/rcardin/kafkaesque"))),
-            "README.md");
+    final FindRepositoriesByUserIdWithTimeout findRepositoriesWithTimeout =
+        new FindRepositoriesByUserIdWithTimeout(gitHubRepository);
 
-    LOGGER.info(
-        "First repository with 'README.md': {}",
-        maybeRepoWithReadme.map(Repository::name).orElse("Not found"));
+    final List<Repository> repositories =
+        findRepositoriesWithTimeout.findRepositories(new UserId(1L), Duration.ofMillis(500L));
+
+    LOGGER.info("GitHub user's repositories: {}", repositories);
   }
 }
