@@ -3,12 +3,10 @@ package in.rcard.sc;
 import java.net.URI;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.StructuredTaskScope;
+import java.util.concurrent.*;
 import java.util.concurrent.StructuredTaskScope.FailedException;
 import java.util.concurrent.StructuredTaskScope.Joiner;
 import java.util.concurrent.StructuredTaskScope.Subtask;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,7 +86,7 @@ public class Main {
     @Override
     public Map<UserId, List<Repository>> findRepositories(List<UserId> userIds)
         throws InterruptedException {
-      var repositoriesByUserId = new HashMap<UserId, List<Repository>>();
+      var repositoriesByUserId = new ConcurrentHashMap<UserId, List<Repository>>() {};
       try (var scope = StructuredTaskScope.open(Joiner.awaitAll())) {
         userIds.forEach(
             userId -> {
