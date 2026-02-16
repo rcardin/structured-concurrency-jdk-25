@@ -1,1 +1,1 @@
-# structured-concurrency-jdk-25
+# Structured Concurrency in JDK 25
